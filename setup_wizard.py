@@ -138,6 +138,18 @@ def do_install(install_dir, log_func, prog_func):
         log_func("Miniconda 安装可能未完成，请检查磁盘空间。")
         return False
     log_func(f"  Miniconda 安装成功")
+
+    # 接受 conda 服务条款 (新版 Miniconda 要求)
+    log_func("  接受 conda 服务条款 ...")
+    tos_channels = [
+        "https://repo.anaconda.com/pkgs/main",
+        "https://repo.anaconda.com/pkgs/r",
+        "https://repo.anaconda.com/pkgs/msys2",
+    ]
+    for ch in tos_channels:
+        result = run(f'"{conda}" tos accept --override-channels --channel {ch}')
+        if result.returncode != 0:
+            log_func(f"  警告: 接受条款失败 for {ch}")
     prog_func(20)
 
     # ── 2. 复制源码 ──
