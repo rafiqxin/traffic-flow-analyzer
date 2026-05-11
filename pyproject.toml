@@ -1,0 +1,41 @@
+[project]
+name = "traffic-flow-analyzer"
+version = "1.0.0"
+description = "交通路口车辆检测/跟踪/计数系统 — YOLO11 + ByteTrack + 双绊线"
+authors = [{name = "rafiqxin"}]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+dependencies = [
+    "ultralytics>=8.3.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
+    "pyyaml>=6.0",
+    "gradio>=5.0.0",
+    "pyqt6>=6.5.0",
+    "torch>=2.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rafiqxin/traffic-flow-analyzer"
+Repository = "https://github.com/rafiqxin/traffic-flow-analyzer"
+Issues = "https://github.com/rafiqxin/traffic-flow-analyzer/issues"
+
+[project.scripts]
+traffic-flow-gui = "gui_app:create_gui"
+traffic-flow-desktop = "desktop_app:main"
+traffic-flow-cli = "main:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

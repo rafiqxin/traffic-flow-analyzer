@@ -1,0 +1,35 @@
+# 模型配置 — 最强精度 + CPU/GPU联合加速
+model:
+  # yolo11l: 大模型, 最佳小目标/远处车辆检测, RTX4060 8GB可运行
+  # 备选: yolo11x (最强但可能OOM), yolo11m (平衡)
+  name: "yolo11x.pt"
+  confidence: 0.10            # ByteTrack二次匹配: 低置信框救回遮挡车辆
+  iou: 0.65                   # 最高IOU抑制大型车双重检测
+
+classes:
+  car: 2
+  motorcycle: 3
+  bus: 5
+  truck: 7
+
+tracker:
+  config: "bytetrack.yaml"
+  track_lost_buffer: 70       # 最大容忍, 补偿YOLO稀疏检测+跟踪断续
+
+video:
+  sample_interval: 3          # 每3帧检测, 25fps→8.3fps推理, 轨迹足够连续
+  resize_width: 3840          # 4K原始分辨率, 最高精度
+  output_fps: 20
+
+# 画质增强
+enhance:
+  enabled: false              # CPU瓶颈, yolo11l+1920px已足够处理低画质
+
+# 帧预取 (CPU/GPU并行)
+prefetch:
+  enabled: true
+  max_queue: 16               # 预取队列大小
+
+speed:
+  pixels_per_meter: 0.0
+  lane_width_meter: 3.5
