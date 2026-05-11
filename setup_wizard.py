@@ -1,253 +1,225 @@
 """
 TrafficFlow Analyzer — Windows 安装向导
-双击运行，自动配置环境并安装
+打包为单文件 exe 后，用户双击即可安装
 """
-import sys
-import os
-import subprocess
-import tempfile
-import zipfile
-import shutil
-import urllib.request
+import sys, os, subprocess, shutil, tempfile
 from pathlib import Path
 
-try:
-    from PyQt6.QtWidgets import (
-        QApplication, QWizard, QWizardPage, QVBoxLayout, QLabel,
-        QProgressBar, QTextEdit, QCheckBox, QLineEdit, QMessageBox,
-    )
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal
-except ImportError:
-    print("PyQt6 required. Installing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyqt6", "-q"])
-    from PyQt6.QtWidgets import (
-        QApplication, QWizard, QWizardPage, QVBoxLayout, QLabel,
-        QProgressBar, QTextEdit, QCheckBox, QLineEdit, QMessageBox,
-    )
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal
+# 打包时 bundle/ 会被内嵌到 exe, 运行时 PyInstaller 解压到 sys._MEIPASS
+if getattr(sys, 'frozen', False):
+    BUNDLE = Path(sys._MEIPASS) / "bundle"
+else:
+    BUNDLE = Path(__file__).parent.parent / "bundle"
 
-MINICONDA_URL = "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
-REPO_URL = "https://github.com/rafiqxin/traffic-flow-analyzer/archive/refs/heads/master.zip"
-DEFAULT_DIR = str(Path.home() / "TrafficFlowAnalyzer")
+MINICONDA_EXE = "miniconda_installer.exe"
+SRC_FILES = [
+    "calibrate_roi.py", "desktop_app.py", "main.py", "pipeline.py",
+    "pyproject.toml", "requirements.txt", ".gitignore",
+]
+SRC_DIRS = ["config", "src"]
+
+ENV_NAME = "yolovenv"
 
 
-class InstallWorker(QThread):
-    log_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
-
-    def __init__(self, install_dir, create_desktop):
-        super().__init__()
-        self.install_dir = install_dir
-        self.create_desktop = create_desktop
-
-    def log(self, msg):
-        self.log_signal.emit(msg)
-
-    def run(self):
-        try:
-            installdir = Path(self.install_dir)
-            installdir.mkdir(parents=True, exist_ok=True)
-
-            # Step 1: Check conda
-            self.log("检查 conda...")
-            conda_exe = shutil.which("conda")
-            if not conda_exe:
-                conda_exe = str(installdir / "miniconda" / "Scripts" / "conda.exe")
-            if not Path(conda_exe).exists():
-                self.log("安装 Miniconda (约需2分钟)...")
-                self._install_miniconda(installdir)
-            else:
-                self.log(f"conda: {conda_exe}")
-            self.progress_signal.emit(20)
-
-            # Step 2: Download source or use bundled
-            self.log("准备源码...")
-            src_dir = installdir / "traffic-flow-analyzer"
-            if (src_dir / "gui_app.py").exists():
-                self.log("源码已存在, 更新中...")
-            else:
-                self._download_source(src_dir)
-            self.progress_signal.emit(30)
-
-            # Step 3: Create conda env
-            env_name = "yolovenv"
-            conda_path = str(installdir / "miniconda" / "Scripts" / "conda.exe")
-            if not Path(conda_path).exists():
-                conda_path = "conda"
-
-            self.log("创建 conda 环境 (约需5分钟)...")
-            subprocess.run(
-                f'"{conda_path}" create -n {env_name} python=3.10 -y',
-                shell=True, capture_output=True, cwd=str(installdir)
-            )
-            self.progress_signal.emit(50)
-
-            self.log("安装 PyTorch + CUDA (约需5分钟)...")
-            subprocess.run(
-                f'"{conda_path}" run -n {env_name} pip install torch torchvision '
-                f'--index-url https://download.pytorch.org/whl/cu121 -q',
-                shell=True, capture_output=True, cwd=str(installdir)
-            )
-            self.progress_signal.emit(70)
-
-            self.log("安装 Python 依赖...")
-            subprocess.run(
-                f'"{conda_path}" run -n {env_name} pip install '
-                f'ultralytics opencv-python numpy scipy matplotlib pyyaml gradio pyqt6 -q',
-                shell=True, capture_output=True, cwd=str(installdir)
-            )
-            self.progress_signal.emit(90)
-
-            # Verify
-            self.log("验证安装...")
-            result = subprocess.run(
-                f'"{conda_path}" run -n {env_name} python -c '
-                f'"import torch; print(\'CUDA:\', torch.cuda.is_available()); '
-                f'import cv2; from ultralytics import YOLO; print(\'OK\')"',
-                shell=True, capture_output=True, text=True, cwd=str(src_dir)
-            )
-            self.log(result.stdout.strip())
-            self.progress_signal.emit(95)
-
-            # Create shortcuts
-            if self.create_desktop:
-                self._create_shortcuts(installdir, src_dir, conda_path, env_name)
-
-            self.progress_signal.emit(100)
-            self.log("安装完成!")
-            self.log(f"安装目录: {installdir}")
-            self.log(f"启动桌面版: {src_dir / 'desktop_app.py'}")
-            self.log(f"启动 Web 版: {src_dir / 'gui_app.py'}")
-
-        except Exception as e:
-            self.log(f"错误: {e}")
-            import traceback
-            self.log(traceback.format_exc())
-
-    def _install_miniconda(self, installdir):
-        mcdir = installdir / "miniconda"
-        installer = installdir / "miniconda_installer.exe"
-        if not installer.exists():
-            self.log("下载 Miniconda...")
-            urllib.request.urlretrieve(MINICONDA_URL, installer)
-        self.log("安装 Miniconda (静默)...")
-        subprocess.run(
-            f'"{installer}" /InstallationType=JustMe /RegisterPython=0 /S '
-            f'/D={mcdir}',
-            shell=True, capture_output=True
-        )
-        try:
-            installer.unlink()
-        except Exception:
-            pass
-
-    def _download_source(self, src_dir):
-        self.log("下载源码...")
-        zip_path = src_dir.parent / "source.zip"
-        urllib.request.urlretrieve(REPO_URL, zip_path)
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(src_dir.parent)
-        extracted = src_dir.parent / "traffic-flow-analyzer-master"
-        if extracted.exists():
-            if src_dir.exists():
-                shutil.rmtree(src_dir)
-            shutil.move(str(extracted), str(src_dir))
-        zip_path.unlink()
-
-    def _create_shortcuts(self, installdir, src_dir, conda_path, env_name):
-        try:
-            desktop = Path.home() / "Desktop"
-            ps = f'''
-$WS = New-Object -ComObject WScript.Shell
-$SC = $WS.CreateShortcut("{desktop}\\TrafficFlow Analyzer.lnk")
-$SC.TargetPath = "{conda_path}"
-$SC.Arguments = "run -n {env_name} python {src_dir / 'desktop_app.py'}"
-$SC.WorkingDirectory = "{src_dir}"
-$SC.IconLocation = "shell32.dll,15"
-$SC.Save()
-'''
-            subprocess.run(["powershell", "-Command", ps], capture_output=True)
-            self.log("桌面快捷方式已创建")
-        except Exception as e:
-            self.log(f"快捷方式创建失败: {e}")
+def run(cmd, **kw):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
 
 
-class InstallWizard(QWizard):
+class SetupWizard:
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("TrafficFlow Analyzer 安装向导")
-        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
-        self.setMinimumSize(560, 420)
-
-        self._page1 = self._create_welcome_page()
-        self._page2 = self._create_install_page()
-        self.addPage(self._page1)
-        self.addPage(self._page2)
-
-    def _create_welcome_page(self):
-        page = QWizardPage()
-        page.setTitle("欢迎使用 TrafficFlow Analyzer")
-        layout = QVBoxLayout(page)
-        layout.addWidget(QLabel(
-            "本向导将安装交通流检测系统及其依赖。\n\n"
-            "需要:\n"
-            "  • Windows 10/11 64位\n"
-            "  • NVIDIA GPU (推荐 8GB+ VRAM)\n"
-            "  • 约 10GB 磁盘空间\n"
-            "  • 网络连接 (下载约 3GB)\n\n"
-            "安装时间: 约 10-20 分钟"
-        ))
-        layout.addWidget(QLabel("安装目录:"))
-        self._dir_edit = QLineEdit(DEFAULT_DIR)
-        layout.addWidget(self._dir_edit)
-        self._desktop_cb = QCheckBox("创建桌面快捷方式")
-        self._desktop_cb.setChecked(True)
-        layout.addWidget(self._desktop_cb)
-        page.setLayout(layout)
-        return page
-
-    def _create_install_page(self):
-        page = QWizardPage()
-        page.setTitle("正在安装")
-        page.setCommitPage(True)
-        layout = QVBoxLayout(page)
-        self._log = QTextEdit()
-        self._log.setReadOnly(True)
-        layout.addWidget(self._log)
-        self._progress = QProgressBar()
-        layout.addWidget(self._progress)
-        page.setLayout(layout)
-        return page
-
-    def initializePage(self, current_id):
-        if current_id == 1:  # Install page
-            self.button(QWizard.WizardButton.BackButton).setEnabled(False)
-            self.button(QWizard.WizardButton.NextButton).setEnabled(False)
-            self.button(QWizard.WizardButton.CancelButton).setEnabled(False)
-
-            self._worker = InstallWorker(
-                self._dir_edit.text(),
-                self._desktop_cb.isChecked()
+        try:
+            from PyQt6.QtWidgets import (
+                QApplication, QWizard, QWizardPage, QVBoxLayout, QLabel,
+                QProgressBar, QTextEdit, QCheckBox, QLineEdit,
             )
-            self._worker.log_signal.connect(self._log.append)
-            self._worker.progress_signal.connect(self._progress.setValue)
-            self._worker.finished.connect(self._on_finished)
-            self._worker.start()
+            from PyQt6.QtCore import Qt, QThread, pyqtSignal
+        except ImportError:
+            print("Installing PyQt6...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyqt6", "-q"])
+            from PyQt6.QtWidgets import (
+                QApplication, QWizard, QWizardPage, QVBoxLayout, QLabel,
+                QProgressBar, QTextEdit, QCheckBox, QLineEdit,
+            )
+            from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
-    def _on_finished(self):
-        self._log.append("\n安装完成! 点击完成退出。")
-        self.button(QWizard.WizardButton.NextButton).setEnabled(True)
-        self.button(QWizard.WizardButton.CancelButton).setEnabled(True)
+        self.QApp = QApplication
+        self.QWizard = QWizard
+        self.QWizardPage = QWizardPage
+        self.QVBoxLayout = QVBoxLayout
+        self.QLabel = QLabel
+        self.QProgressBar = QProgressBar
+        self.QTextEdit = QTextEdit
+        self.QCheckBox = QCheckBox
+        self.QLineEdit = QLineEdit
+        self.Qt = Qt
+        self.QThread = QThread
+        self.pyqtSignal = pyqtSignal
+
+    def run_wizard(self):
+        app = self.QApp(sys.argv)
+        app.setStyle("Fusion")
+        wizard = self._build_wizard()
+        wizard.show()
+        sys.exit(app.exec())
+
+    def _build_wizard(self):
+        Qt = self.Qt
+        wiz = self.QWizard()
+        wiz.setWindowTitle("TrafficFlow Analyzer v1.0.0 安装向导")
+        wiz.setWizardStyle(self.QWizard.WizardStyle.ModernStyle)
+        wiz.setMinimumSize(560, 440)
+
+        # ── Page 1: Welcome ──
+        p1 = self.QWizardPage()
+        p1.setTitle("欢迎使用 TrafficFlow Analyzer")
+        l1 = self.QVBoxLayout(p1)
+        l1.addWidget(self.QLabel(
+            "交通路口车辆检测/跟踪/计数系统\n\n"
+            "本向导将自动安装:\n"
+            "  1. Miniconda (Python 环境管理)\n"
+            "  2. PyTorch + CUDA (GPU 加速)\n"
+            "  3. YOLO11 + ByteTrack (检测跟踪)\n"
+            "  4. 桌面应用程序\n\n"
+            "系统要求: Windows 10/11, NVIDIA GPU, ~10GB 磁盘\n"
+            "安装时间: 约 15-20 分钟 (需网络下载 PyTorch ~2GB)"
+        ))
+        l1.addWidget(self.QLabel("安装目录:"))
+        self._dir_edit = self.QLineEdit(str(Path.home() / "TrafficFlowAnalyzer"))
+        l1.addWidget(self._dir_edit)
+        self._desktop_cb = self.QCheckBox("创建桌面快捷方式")
+        self._desktop_cb.setChecked(True)
+        l1.addWidget(self._desktop_cb)
+        p1.setLayout(l1)
+        wiz.addPage(p1)
+
+        # ── Page 2: Install progress ──
+        p2 = self.QWizardPage()
+        p2.setTitle("正在安装")
+        p2.setCommitPage(True)
+        l2 = self.QVBoxLayout(p2)
+        self._log = self.QTextEdit()
+        self._log.setReadOnly(True)
+        l2.addWidget(self._log)
+        self._progress = self.QProgressBar()
+        l2.addWidget(self._progress)
+        p2.setLayout(l2)
+        wiz.addPage(p2)
+
+        # ── Install worker ──
+        class Worker(self.QThread):
+            log_sig = self.pyqtSignal(str)
+            prog_sig = self.pyqtSignal(int)
+            finished_sig = self.pyqtSignal()
+
+            def __init__(self, install_dir, desktop):
+                super().__init__()
+                self.dir = install_dir
+                self.desk = desktop
+
+            def log(self, msg):
+                self.log_sig.emit(msg)
+
+            def run(self):
+                try:
+                    d = Path(self.dir)
+                    d.mkdir(parents=True, exist_ok=True)
+
+                    # 1. Install Miniconda from bundle
+                    self.log("安装 Miniconda...")
+                    mci = BUNDLE / MINICONDA_EXE
+                    if not mci.exists():
+                        self.log("错误: 未找到 Miniconda 安装包")
+                        return
+                    run(f'"{mci}" /InstallationType=JustMe /RegisterPython=0 /S /D={d / "miniconda"}')
+                    self.prog_sig.emit(25)
+
+                    # 2. Copy source
+                    self.log("安装应用程序...")
+                    for f in SRC_FILES:
+                        src = BUNDLE / f
+                        if src.exists():
+                            shutil.copy2(src, d / f)
+                    for sd in SRC_DIRS:
+                        src_dir = BUNDLE / sd
+                        if src_dir.exists():
+                            dst = d / sd
+                            if dst.exists():
+                                shutil.rmtree(dst)
+                            shutil.copytree(src_dir, dst)
+                    self.prog_sig.emit(35)
+
+                    # 3. Create conda env
+                    conda = str(d / "miniconda" / "Scripts" / "conda.exe")
+                    self.log("创建 Python 环境...")
+                    run(f'"{conda}" create -n {ENV_NAME} python=3.10 -y')
+                    self.prog_sig.emit(45)
+
+                    # 4. Install PyTorch
+                    self.log("安装 PyTorch + CUDA (约2GB, 需几分钟)...")
+                    run(f'"{conda}" run -n {ENV_NAME} pip install torch torchvision '
+                        f'--index-url https://download.pytorch.org/whl/cu121 -q')
+                    self.prog_sig.emit(65)
+
+                    # 5. Install other deps
+                    self.log("安装 Python 依赖...")
+                    run(f'"{conda}" run -n {ENV_NAME} pip install '
+                        f'ultralytics opencv-python numpy scipy matplotlib pyyaml pyqt6 -q')
+                    self.prog_sig.emit(85)
+
+                    # 6. Verify
+                    self.log("验证安装...")
+                    result = run(
+                        f'"{conda}" run -n {ENV_NAME} python -c '
+                        f'"import torch; print(\'CUDA:\', torch.cuda.is_available()); '
+                        f'import cv2; from ultralytics import YOLO; print(\'OK\')"'
+                    )
+                    self.log(result.stdout.strip() or "OK")
+                    self.prog_sig.emit(95)
+
+                    # 7. Shortcuts
+                    if self.desk:
+                        self._make_shortcut(d, conda)
+                    self.prog_sig.emit(100)
+                    self.log("安装完成!")
+                    self.log(f"程序目录: {d}")
+                    self.log(f"启动命令: {conda} run -n {ENV_NAME} python {d / 'desktop_app.py'}")
+                    self.finished_sig.emit()
+
+                except Exception as e:
+                    import traceback
+                    self.log(f"错误: {e}\n{traceback.format_exc()}")
+
+            def _make_shortcut(self, d, conda):
+                try:
+                    desktop = Path.home() / "Desktop"
+                    ps = (
+                        f'$WS = New-Object -ComObject WScript.Shell; '
+                        f'$SC = $WS.CreateShortcut("{desktop}\\TrafficFlow Analyzer.lnk"); '
+                        f'$SC.TargetPath = "{conda}"; '
+                        f'$SC.Arguments = "run -n {ENV_NAME} python {d / "desktop_app.py"}"; '
+                        f'$SC.WorkingDirectory = "{d}"; '
+                        f'$SC.IconLocation = "shell32.dll,15"; $SC.Save()'
+                    )
+                    subprocess.run(["powershell", "-Command", ps], capture_output=True)
+                    self.log("桌面快捷方式已创建")
+                except Exception as e:
+                    self.log(f"快捷方式失败: {e}")
+
+        self._worker = Worker(self._dir_edit.text(), self._desktop_cb.isChecked())
+        self._worker.log_sig.connect(self._log.append)
+        self._worker.prog_sig.connect(self._progress.setValue)
+        self._worker.finished_sig.connect(lambda: (
+            self._log.append("\n点击完成退出安装向导。"),
+        ))
+
+        wiz.currentIdChanged.connect(lambda cid: (
+            self._worker.start() if cid == 1 else None
+        ))
+        return wiz
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-
-    # 检查是否已安装(有 conda env), 直接启动
-    wizard = InstallWizard()
-    wizard.show()
-    sys.exit(app.exec())
+    SetupWizard().run_wizard()
 
 
 if __name__ == "__main__":
