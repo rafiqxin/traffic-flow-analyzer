@@ -370,7 +370,7 @@ class DesktopApp(QMainWindow):
         if not ret:
             QMessageBox.warning(self, "错误", "读取帧失败")
             return
-self._canvas.set_frame(frame)
+        self._canvas.set_frame(frame)
         self._run_btn.setEnabled(True)
         self._status_label.setText(
             f"标定帧 ({self._orig_size[0]}x{self._orig_size[1]}) | 在画面上点击标定A/B线"
