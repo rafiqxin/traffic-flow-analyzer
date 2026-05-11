@@ -27,3 +27,12 @@ Thumbs.db
 
 # Conda
 .env_conda/
+
+# PyInstaller
+*.spec
+dist/
+build/
+
+# Release
+TrafficFlowAnalyzer_Setup*.exe
+

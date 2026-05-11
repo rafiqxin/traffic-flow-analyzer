@@ -19,9 +19,9 @@ EXCLUDE = {
 INCLUDE = [
     "README.md", "LICENSE", ".gitignore",
     "pyproject.toml", "requirements.txt",
-    "setup.bat", "run.bat",
+    "setup.bat", "run.bat", "install.bat",
     "main.py", "gui_app.py", "desktop_app.py",
-    "pipeline.py", "calibrate_roi.py",
+    "pipeline.py", "calibrate_roi.py", "setup_wizard.py",
     "config/model_config.yaml", "config/camera_roi.yaml",
     "src/__init__.py", "src/detector.py", "src/tracker.py",
     "src/roi_filter.py", "src/visualizer.py", "src/data_processor.py",
