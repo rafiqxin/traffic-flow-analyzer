@@ -370,11 +370,7 @@ class DesktopApp(QMainWindow):
         if not ret:
             QMessageBox.warning(self, "错误", "读取帧失败")
             return
-        h, w = frame.shape[:2]
-        if w > 1000:
-            scale = 1000 / w
-            frame = cv2.resize(frame, (1000, int(h * scale)))
-        self._canvas.set_frame(frame)
+self._canvas.set_frame(frame)
         self._run_btn.setEnabled(True)
         self._status_label.setText(
             f"标定帧 ({self._orig_size[0]}x{self._orig_size[1]}) | 在画面上点击标定A/B线"
@@ -451,33 +447,43 @@ class DesktopApp(QMainWindow):
     def _on_done(self, result):
         self._run_btn.setEnabled(True)
         self._progress.setVisible(False)
-        stats = result["stats"]
-        self._status_label.setText(
-            f"完成! 总计: {stats.total_vehicles} | "
-            f"car:{stats.vehicles_by_type.get('car',0)} "
-            f"bus:{stats.vehicles_by_type.get('bus',0)} "
-            f"truck:{stats.vehicles_by_type.get('truck',0)} "
-            f"moto:{stats.vehicles_by_type.get('motorcycle',0)} | "
-            f"耗时:{result['elapsed']:.0f}s @ {result['fps']:.1f}fps"
-        )
 
-        # Table
-        self._table.setRowCount(0)
-        for k, v in stats.vehicles_by_type.items():
+        if result is None:
+            self._status_label.setText("错误: 未返回结果")
+            return
+
+        stats = result.get("stats")
+        if stats:
+            self._status_label.setText(
+                f"完成! 总计: {stats.total_vehicles} | "
+                f"car:{stats.vehicles_by_type.get('car',0)} "
+                f"bus:{stats.vehicles_by_type.get('bus',0)} "
+                f"truck:{stats.vehicles_by_type.get('truck',0)} "
+                f"moto:{stats.vehicles_by_type.get('motorcycle',0)} | "
+                f"耗时:{result.get('elapsed',0):.0f}s @ {result.get('fps',0):.1f}fps"
+            )
+
+            # Table
+            self._table.setRowCount(0)
+            for k, v in stats.vehicles_by_type.items():
+                r = self._table.rowCount()
+                self._table.insertRow(r)
+                self._table.setItem(r, 0, QTableWidgetItem(k))
+                self._table.setItem(r, 1, QTableWidgetItem(str(v)))
             r = self._table.rowCount()
             self._table.insertRow(r)
-            self._table.setItem(r, 0, QTableWidgetItem(k))
-            self._table.setItem(r, 1, QTableWidgetItem(str(v)))
-        r = self._table.rowCount()
-        self._table.insertRow(r)
-        self._table.setItem(r, 0, QTableWidgetItem("总计"))
-        self._table.setItem(r, 1, QTableWidgetItem(str(stats.total_vehicles)))
+            self._table.setItem(r, 0, QTableWidgetItem("总计"))
+            self._table.setItem(r, 1, QTableWidgetItem(str(stats.total_vehicles)))
+        else:
+            self._status_label.setText(f"完成! 耗时:{result.get('elapsed',0):.0f}s (无统计数据)")
 
         # Video link
         vpath = result.get("output_video")
         if vpath and os.path.exists(vpath):
             self._video_result_label.setText(f"输出视频已生成:\n{vpath}")
             self._video_result_label.setStyleSheet("color:#4CAF50; padding:20px;")
+        else:
+            self._video_result_label.setText("(视频未生成)")
 
         # Charts
         self._fig.clear()
@@ -488,6 +494,7 @@ class DesktopApp(QMainWindow):
             ax = self._fig.add_subplot(211)
             ax.imshow(flow_img)
             ax.axis("off")
+            ax.set_title("Traffic Flow Timeline")
         type_path = result.get("charts", {}).get("vehicle_types")
         if type_path and os.path.exists(type_path):
             type_img = cv2.imread(type_path)
@@ -495,6 +502,7 @@ class DesktopApp(QMainWindow):
             ax2 = self._fig.add_subplot(212)
             ax2.imshow(type_img)
             ax2.axis("off")
+            ax2.set_title("Vehicle Types")
         self._fig.tight_layout()
         self._canvas_chart.draw()
         self._result_tabs.setVisible(True)
