@@ -118,17 +118,30 @@ def do_install(install_dir, log_func, prog_func):
     d.mkdir(parents=True, exist_ok=True)
     conda = str(d / "miniconda" / "Scripts" / "conda.exe")
 
-    # 1. Miniconda
-    log_func("[1/6] 安装 Miniconda ...")
+    # ── 1. Miniconda ──
+    log_func("[1/6] 安装 Miniconda (离线) ...")
     mci = BUNDLE / MINICONDA_EXE
     if not mci.exists():
         log_func("错误: 未找到 Miniconda 安装包")
         return False
-    run(f'"{mci}" /InstallationType=JustMe /RegisterPython=0 /S /D={d / "miniconda"}')
+
+    result = run(f'"{mci}" /InstallationType=JustMe /RegisterPython=0 /S /D={d / "miniconda"}')
+    if result.returncode != 0:
+        log_func(f"Miniconda 安装失败 (code={result.returncode})")
+        if result.stderr:
+            log_func(f"  stderr: {result.stderr.strip()}")
+        return False
+
+    # 验证 conda.exe 存在
+    if not Path(conda).exists():
+        log_func(f"错误: conda.exe 未找到: {conda}")
+        log_func("Miniconda 安装可能未完成，请检查磁盘空间。")
+        return False
+    log_func(f"  Miniconda 安装成功")
     prog_func(20)
 
-    # 2. 复制源码
-    log_func(f"[2/6] 安装应用程序到 {d} ...")
+    # ── 2. 复制源码 ──
+    log_func(f"[2/6] 复制应用程序到 {d} ...")
     for f in SRC_FILES:
         src = BUNDLE / f
         if src.exists():
@@ -140,43 +153,72 @@ def do_install(install_dir, log_func, prog_func):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(src_dir, dst)
+    log_func(f"  源码复制完成")
     prog_func(35)
 
-    # 3. 创建 conda 环境
+    # ── 3. 创建 conda 环境 ──
     log_func(f"[3/6] 创建 Python 3.10 环境 '{ENV_NAME}' ...")
-    run(f'"{conda}" create -n {ENV_NAME} python=3.10 -y')
+    result = run(f'"{conda}" create -n {ENV_NAME} python=3.10 -y')
+    if result.returncode != 0:
+        log_func(f"Conda 环境创建失败 (code={result.returncode})")
+        if result.stdout:
+            log_func(f"  stdout: {result.stdout.strip()[-300:]}")
+        if result.stderr:
+            log_func(f"  stderr: {result.stderr.strip()}")
+        return False
+
+    # 验证环境存在
+    env_python = d / "miniconda" / "envs" / ENV_NAME / "python.exe"
+    if not env_python.exists():
+        log_func(f"错误: 环境 Python 未找到: {env_python}")
+        log_func("可能是磁盘空间不足或 conda 配置问题。")
+        return False
+    log_func(f"  Python 环境创建成功: {env_python}")
     prog_func(50)
 
-    # 4. PyTorch (~2GB 在线下载)
+    # ── 4. PyTorch (~2GB 在线下载) ──
     log_func("[4/6] 下载安装 PyTorch + CUDA 12.1 (~2GB) ...")
     result = run(
         f'"{conda}" run -n {ENV_NAME} pip install torch torchvision '
-        f'--index-url https://download.pytorch.org/whl/cu121 -q'
+        f'--index-url https://download.pytorch.org/whl/cu121'
     )
     if result.returncode != 0:
-        log_func(f"PyTorch 安装失败: {result.stderr}")
+        log_func(f"PyTorch 安装失败 (code={result.returncode})")
+        # 打印最后几行错误
+        err_lines = result.stderr.strip().split("\n")
+        for line in err_lines[-5:]:
+            if line.strip():
+                log_func(f"  {line.strip()}")
         return False
+    log_func("  PyTorch 安装成功")
     prog_func(70)
 
-    # 5. AI + GUI 依赖
+    # ── 5. AI + GUI 依赖 ──
     log_func("[5/6] 安装 ultralytics + OpenCV + PyQt6 ...")
     result = run(
         f'"{conda}" run -n {ENV_NAME} pip install '
-        f'ultralytics opencv-python numpy scipy matplotlib pyyaml pyqt6 -q'
+        f'ultralytics opencv-python numpy scipy matplotlib pyyaml pyqt6'
     )
     if result.returncode != 0:
-        log_func(f"依赖安装失败: {result.stderr}")
+        log_func(f"依赖安装失败 (code={result.returncode})")
+        err_lines = result.stderr.strip().split("\n")
+        for line in err_lines[-5:]:
+            if line.strip():
+                log_func(f"  {line.strip()}")
         return False
+    log_func("  依赖安装成功")
     prog_func(90)
 
-    # 6. 验证
+    # ── 6. 验证 ──
     log_func("[6/6] 验证安装 ...")
     result = run(
         f'"{conda}" run -n {ENV_NAME} python -c '
         f'"import torch; print(\'CUDA:\', torch.cuda.is_available()); '
         f'import cv2; from ultralytics import YOLO; print(\'OK\')"'
     )
-    log_func(f"  {result.stdout.strip() or 'OK'}")
+    log_func(f"  {result.stdout.strip()}")
+    if result.returncode != 0:
+        log_func(f"  验证警告: {result.stderr.strip()}")
     prog_func(100)
     log_func("")
     log_func("=" * 50)
